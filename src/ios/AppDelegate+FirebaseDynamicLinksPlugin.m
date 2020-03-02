@@ -11,6 +11,10 @@
     dispatch_once(&onceToken, ^{
         [self swizzleMethod:@selector(application:openURL:options:)];
         [self swizzleMethod:@selector(application:continueUserActivity:restorationHandler:)];
+        
+        // Modification to plugin to handle dynamic links on app launch
+        [self swizzleMethod:@selector(application:didFinishLaunchingWithOptions:)];
+        // End modification
     });
 }
 
@@ -39,7 +43,7 @@
     FirebaseDynamicLinksPlugin* dl = [self.viewController getCommandInstance:@"FirebaseDynamicLinks"];
     // parse firebase dynamic link
     FIRDynamicLink *dynamicLink = [[FIRDynamicLinks dynamicLinks] dynamicLinkFromCustomSchemeURL:url];
-    if (dynamicLink) {
+    if (dynamicLink && dynamicLink.url) {
         [dl postDynamicLink:dynamicLink];
         handled = TRUE;
     }
@@ -53,21 +57,45 @@
 - (BOOL)swizzled_application:(UIApplication *)app continueUserActivity:(NSUserActivity *)userActivity restorationHandler:(void (^)(NSArray *))restorationHandler {
     // always call original method implementation first
     BOOL handled = [self swizzled_application:app continueUserActivity:userActivity restorationHandler:restorationHandler];
-    FirebaseDynamicLinksPlugin* dl = [self.viewController getCommandInstance:@"FirebaseDynamicLinks"];
+    // Modification to the plugin to fix an app launch issue
+    
+    // FirebaseDynamicLinksPlugin* dl = [self.viewController getCommandInstance:@"FirebaseDynamicLinks"];
     // handle firebase dynamic link
     return [[FIRDynamicLinks dynamicLinks]
         handleUniversalLink:userActivity.webpageURL
         completion:^(FIRDynamicLink * _Nullable dynamicLink, NSError * _Nullable error) {
+            FirebaseDynamicLinksPlugin* dl = [self.viewController getCommandInstance:@"FirebaseDynamicLinks"];
+    // End modification
+
             // Try this method as some dynamic links are not recognize by handleUniversalLink
             // ISSUE: https://github.com/firebase/firebase-ios-sdk/issues/743
             dynamicLink = dynamicLink ? dynamicLink
                 : [[FIRDynamicLinks dynamicLinks]
                    dynamicLinkFromUniversalLinkURL:userActivity.webpageURL];
 
-            if (dynamicLink) {
+            if (dynamicLink && dynamicLink.url) {
                 [dl postDynamicLink:dynamicLink];
             }
         }] || handled;
 }
 
+// [START didfinishlaunching]
+- (BOOL)default_application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions {
+    return FALSE;
+}
+- (BOOL)swizzled_application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions {
+    // always call original method implementation first
+    [self swizzled_application:application didFinishLaunchingWithOptions:launchOptions];
+
+    if (![FIRApp defaultApp]) {
+        [FIRApp configure];
+    }
+    NSDictionary *userActivityDictionary = [launchOptions objectForKey:UIApplicationLaunchOptionsUserActivityDictionaryKey];
+
+    if (userActivityDictionary) {
+        // Continue activity here
+        return YES;
+    }
+}
+// [END didfinishlaunching]
 @end

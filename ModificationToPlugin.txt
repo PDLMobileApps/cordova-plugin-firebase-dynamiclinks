@@ -1,0 +1,76 @@
+Firebase configuration for iOS is read from GoogleService-Info.plist, which is located in the project root
+and needs to be copied to the app resources folder (platform/ios/Food Lion/Resources). That is achieved by adding the
+following line in the config.xml, in the <platform name="ios"> section:
+
+<resource-file src="GoogleService-Info.plist" />
+
+For details on how to get GoogleService-Info.plist, refer to: https://firebase.google.com/docs/ios/setup#initialize_firebase_in_your_app
+
+----------------------
+On Android we have to add AndroidLaunchMode setting to the config.xml inside <platform name="android">:
+
+    <preference name="AndroidLaunchMode" value="singleTask" />
+
+This necessary in order to prevent creating of multiple app activities.
+
+----------------------
+
+
+iOS has an issue where clicking on dynamic link when the app is closed does not go the correct page after launching the app, it always goes to the home page.
+The plugin code handles dynamic link in the continueuseractivity method but this method is only called when the app is resumed from background.
+It is not called when the app is not running. So to fix this we have to override didfinishlaunching method in the plugin and return YES from this mehod 
+when UserActivityDictionary is found. Returning YES from this method calls continueuseractivity where dynamic link is handled.
+
+Modified src/ios/AppDelegate+FirebaseDynamicLinksPlugin.m, (void)load method, added the below lines to override didFinishLaunchingWithOptions:
+
+    [self swizzleMethod:@selector(application:continueUserActivity:restorationHandler:)];
+        
+    // Modification to plugin to handle dynamic links on app launch
+    [self swizzleMethod:@selector(application:didFinishLaunchingWithOptions:)];
+    // End modification
+
+Moved the below line inside the return function in continueUserActivity method
+
+    // Modification to the plugin to fix an app launch issue
+    
+    // FirebaseDynamicLinksPlugin* dl = [self.viewController getCommandInstance:@"FirebaseDynamicLinks"];
+    // handle firebase dynamic link
+    return [[FIRDynamicLinks dynamicLinks]
+        handleUniversalLink:userActivity.webpageURL
+        completion:^(FIRDynamicLink * _Nullable dynamicLink, NSError * _Nullable error) {
+            FirebaseDynamicLinksPlugin* dl = [self.viewController getCommandInstance:@"FirebaseDynamicLinks"];
+    
+    // End modification
+
+Added the didFinishLaunchingWithOptions override method in the end of file
+
+    // [START didfinishlaunching]
+    - (BOOL)default_application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions {
+        return FALSE;
+    }
+    - (BOOL)swizzled_application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions {
+        // always call original method implementation first
+        [self swizzled_application:application didFinishLaunchingWithOptions:launchOptions];
+
+        if (![FIRApp defaultApp]) {
+            [FIRApp configure];
+        }
+        NSDictionary *userActivityDictionary = [launchOptions objectForKey:UIApplicationLaunchOptionsUserActivityDictionaryKey];
+
+        if (userActivityDictionary) {
+            // Continue activity here
+            return YES;
+        }
+    }
+    // [END didfinishlaunching]
+
+Replaced the following code
+    if (dynamicLink) {
+        [dl postDynamicLink:dynamicLink];
+    }
+
+ with
+    if (dynamicLink && dynamicLink.url) {
+        [dl postDynamicLink:dynamicLink];
+    }
+in two different  places.
